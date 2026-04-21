@@ -4,6 +4,25 @@
 
 ---
 
+## 版本说明
+
+| 版本 | 状态 | 核心理念 | 文档 |
+|------|------|----------|------|
+| **v2（当前设计方向）** | 设计中，与 v1 并行运行对比 | Personal Model 为中心：系统持续推断"你是谁"，App 只是 Personal Model 的投影界面 | [`Nervus_v2_系统设计文档.md`](./Nervus_v2_系统设计文档.md) |
+| v1（已部署运行） | 运行中 | Arbor Core 为中心：事件路由，App 各自处理数据 | [`Nervus_完整开发文档.md`](./Nervus_完整开发文档.md) |
+
+**v1 vs v2 最核心的区别**：
+
+```
+v1：感知 → Arbor Core 路由 → App 接收事件 → App 自己做推断 → App 写 Memory Graph
+
+v2：感知 → Model Updater 更新 Personal Model → App 订阅维度变化 → App 展示
+```
+
+v1 是"用 AI 连接 20 个 App"，v2 是"一个持续存在的个人智能体，App 只是它表达自己的界面"。
+
+---
+
 ## 这是什么
 
 Nervus 不是一个 App，不是一个平台，不是一个助手。
@@ -22,14 +41,57 @@ Nervus 不是一个 App，不是一个平台，不是一个助手。
 
 ---
 
-## 核心架构
+## v2 核心架构
+
+```
+┌──────────────────────────────────────────────────┐
+│              感知层 Perception Layer               │
+│  [相机] [麦克风] [日历] [RSS] [位置] [传感器]       │
+└─────────────────────┬────────────────────────────┘
+                      │
+                      ▼
+┌──────────────────────────────────────────────────┐
+│           突触总线 Synapse Bus（NATS）              │
+└──────────┬───────────────────────┬───────────────┘
+           │                       │
+           ▼                       ▼
+┌─────────────────┐    ┌───────────────────────────┐
+│  快循环          │    │  慢循环                     │
+│  Arbor Core v2  │    │  Model Updater             │
+│  实时路由 <2s    │    │  每5分钟，后台静默           │
+└─────────────────┘    └──────────────┬────────────┘
+                                      │ 更新维度
+                                      ▼
+┌──────────────────────────────────────────────────┐
+│              Personal Model Layer                 │
+│                                                  │
+│  维度状态（Redis）：                               │
+│  nutrition_24h | cognitive_load | sleep_quality  │
+│  active_topics | daily_routine | ...             │
+│                                                  │
+│  维度历史（pgvector）：时序快照 + 语义检索           │
+│                                                  │
+│  跨维度推断：规律发现 | 异常检测 | 主动预判          │
+└─────────────────────┬────────────────────────────┘
+                      │ model.dimension.updated.*
+                      ▼
+┌──────────────────────────────────────────────────┐
+│                   App Layer                       │
+│  每个 App 是 Personal Model 某些维度的 UI 投影     │
+│  App 不做 AI 推断，只负责展示和交互                 │
+└──────────────────────────────────────────────────┘
+```
+
+---
+
+## v1 架构（保留参考）
 
 ```
 感知层（照片/录音/日历/RSS）
     ↓
 Synapse Bus（NATS 事件总线）
     ↓
-Arbor Core（本地 AI 神经中枢 · Qwen3.5-4B 多模态 · 24h 常驻）
+Arbor Core（本地 AI 神经中枢 · Qwen3.5-4B · 24h 常驻）
     ↓
 App Layer（20个 App · 通过 NSI 接口互联）
     ↓
@@ -66,27 +128,44 @@ Context Graph（当下状态 · Redis）
 |------|------|
 | 容器编排 | Docker Compose |
 | 事件总线 | NATS + JetStream |
-| 当下状态 | Redis（Context Graph） |
-| 长期记忆 | PostgreSQL + pgvector（Memory Graph） |
+| 当下状态 | Redis（Context Graph / 维度状态） |
+| 长期记忆 | PostgreSQL + pgvector（Memory Graph / 维度历史） |
 | 本地 AI | llama.cpp server + Qwen3.5-4B 多模态 |
 | 语音转写 | faster-whisper |
-| AI 中枢 | Python + FastAPI（Arbor Core） |
+| AI 中枢 | Python + FastAPI（Arbor Core v2） |
+| 模型维护 | Python（Model Updater · v2 新增） |
+| 推断引擎 | Python（Insight Engine · v2 新增） |
 | App 后端 | FastAPI / Fastify |
 | 移动端壳 | Capacitor.js（iOS 优先） |
-| 内部 SDK | nervus-sdk（自研） |
+| 内部 SDK | nervus-sdk v2（自研） |
 
 ---
 
 ## 仓库文件
 
-| 文件 | 说明 |
-|------|------|
-| [`Nervus_完整开发文档.md`](./Nervus_完整开发文档.md) | 完整开发文档：架构·设计·契约·计划 |
-| [`app-prototype.html`](./app-prototype.html) | 前端交互原型（可直接浏览器打开） |
+| 文件 | 版本 | 说明 |
+|------|------|------|
+| [`Nervus_v2_系统设计文档.md`](./Nervus_v2_系统设计文档.md) | **v2** | Personal Model 为中心的完整系统设计：架构·维度体系·服务设计·Sprint 计划 |
+| [`Nervus_完整开发文档.md`](./Nervus_完整开发文档.md) | v1 | v1 完整开发文档：架构·设计·契约·计划 |
+| [`app-prototype.html`](./app-prototype.html) | v1 | 前端交互原型（可直接浏览器打开） |
 
 ---
 
-## 开发计划概览
+## v2 开发计划
+
+| Sprint | 内容 | 关键产出 |
+|--------|------|----------|
+| Sprint 0（第1周） | 基础设施扩展 | Model Updater 服务骨架，dimension_snapshots 表，5个核心维度定义 |
+| Sprint 1（第2周） | 第一个完整维度 | nutrition_24h 端到端：拍照→维度更新→App 收到通知 |
+| Sprint 2（第3周） | 扩展维度 + API | 5个维度全部运行，Personal Model API，自然语言查询基础版 |
+| Sprint 3（第4周） | Insight Engine | 第一个跨维度规律自动发现（高压力日→差饮食） |
+| Sprint 4-5（第5-6周） | App 迁移 + 对比 | 主要 App 迁移 v2 协议，v1 vs v2 正式对比测试 |
+
+完整设计见 [v2 系统设计文档](./Nervus_v2_系统设计文档.md)。
+
+---
+
+## v1 开发计划概览
 
 | Sprint | 内容 | 目标 |
 |--------|------|------|
@@ -97,8 +176,6 @@ Context Graph（当下状态 · Redis）
 | Sprint 4 | Memory Graph | 长期记忆 + Sense 页数据化 |
 | Sprint 5 | App NSI 接入 | 20个 App 打通，旗舰体验可用 |
 | Sprint 6 | Capacitor iOS | 完整移动端 MVP |
-
-详细任务清单和验收标准见 [完整开发文档](./Nervus_完整开发文档.md)。
 
 ---
 
